@@ -6,7 +6,7 @@ import chisel3.util._
 
 // Defining ALU operations as enumeration type using ChiselEnum
 object ALUops extends ChiselEnum {
-    val PADDB,PAADDB,PAADDUB,PSADDUB , PSUBB,PASUBB,PASUBUB,PSSUBB,PSSUBUB , PADDH,PAADDH,PAADDUH,PSADDH,PSADDUH , PSUBH,PASUBH,PASUBUH,PSSUBH,PSSUBUH  = Value
+    val PADDB,PAADDB,PAADDUB,PSADDUB , PSUBB,PASUBB,PASUBUB,PSSUBB,PSSUBUB , PADDH,PAADDH,PAADDUH,PSADDH,PSADDUH , PSUBH,PASUBH,PASUBUH,PSSUBH,PSSUBUH, PASHX,PAASHX,PSASHX,PSAHX,PASAHX,PSSAHX  = Value
 }
 
 //================================
@@ -671,7 +671,243 @@ class PextALU extends Module {
         
         io.Rd        := Cat(sumWires(3)(7,0) , sumWires(2)(7,0) , sumWires(1)(7,0) , sumWires(0)(7,0))
         io.vxsat_out := Cat(io.vxsat_in(31, 1) , overflowDetected(0) | overflowDetected(1) | overflowDetected(2) | overflowDetected(3))  
- 
+    
+    //==================================================
+    //PAS.HX -- SIMD 16-bit Cross Addition & Subtraction
+    //================================================== 
+    }.elsewhen(io.operation === ALUops.PASHX) {
+        twosComplement.io.widthSel := true.B        // 16bit complement generator selected
+        // Adder 0      ===ADDITION===
+        fourByteAdder.io.a(0)       := io.Rs1(23 , 16)
+        fourByteAdder.io.b(0)       := io.Rs2(7 , 0)
+        fourByteAdder.io.carryIn(0) := 0.U
+        sumWires(2)                 := fourByteAdder.io.sum(0)
+        // Adder 1
+        fourByteAdder.io.a(1)       := io.Rs1(31 , 24)
+        fourByteAdder.io.b(1)       := io.Rs2(15 , 8)
+        fourByteAdder.io.carryIn(1) := fourByteAdder.io.carryOut(0)
+        sumWires(3)                 := fourByteAdder.io.sum(1)
+       // Adder 2       ===SUBTRACTION===
+       fourByteAdder.io.a(2)       := io.Rs1(7 , 0)
+       twosComplement.io.input(2)  := io.Rs2(23 , 16)
+       fourByteAdder.io.b(2)       := twosComplement.io.output(2)
+       fourByteAdder.io.carryIn(2) := 0.U
+       sumWires(0)                 := fourByteAdder.io.sum(2)
+       // Adder 3
+       fourByteAdder.io.a(3)       := io.Rs1(15 , 8)
+       twosComplement.io.input(3)  := Cat(io.Rs2(31) , io.Rs2(31 , 24))
+       fourByteAdder.io.b(3)       := twosComplement.io.output(3)
+       fourByteAdder.io.carryIn(3) := fourByteAdder.io.carryOut(2)
+       sumWires(1)                 := fourByteAdder.io.sum(3)
+
+       io.Rd        := Cat(sumWires(3)(7,0) , sumWires(2)(7,0) , sumWires(1)(7,0) , sumWires(0)(7,0))
+       io.vxsat_out := io.vxsat_in     // Status register
+
+    //===================================================================
+    //PAAS.HX -- SIMD 16-bit Signed Averaging Cross Addition & Subtraction
+    //===================================================================
+    }.elsewhen(io.operation === ALUops.PAASHX) {
+        twosComplement.io.widthSel := true.B        // 16bit complement generator selected
+        // Adder 0          ===ADDITION===
+        fourByteAdder.io.a(0)       := io.Rs1(23 , 16)
+        fourByteAdder.io.b(0)       := io.Rs2(7 , 0)
+        fourByteAdder.io.carryIn(0) := 0.U
+        sumWires(2)                 := fourByteAdder.io.sum(0)       
+        // Adder 1
+        fourByteAdder.io.a(1)       := Cat(io.Rs1(31) , io.Rs1(31 , 24))
+        fourByteAdder.io.b(1)       := Cat(io.Rs2(15) , io.Rs2(15 , 8))
+        fourByteAdder.io.carryIn(1) := fourByteAdder.io.carryOut(0)
+        sumWires(3)                 := fourByteAdder.io.sum(1)
+        // Adder 2          ===SUBTRACTION===
+        fourByteAdder.io.a(2)       := io.Rs1(7 , 0)
+        twosComplement.io.input(2)  := Cat(io.Rs2(23) , io.Rs2(23 , 16))
+        fourByteAdder.io.b(2)       := twosComplement.io.output(2)
+        fourByteAdder.io.carryIn(2) := 0.U
+        sumWires(0)                 := fourByteAdder.io.sum(2)
+        // Adder 3
+        fourByteAdder.io.a(3)       := Cat(io.Rs1(15) , io.Rs1(15 , 8))
+        twosComplement.io.input(3)  := Cat(io.Rs2(31) , io.Rs2(31 , 24))
+        fourByteAdder.io.b(3)       := twosComplement.io.output(3)
+        fourByteAdder.io.carryIn(3) := fourByteAdder.io.carryOut(2)
+        sumWires(1)                 := fourByteAdder.io.sum(3)
+
+        io.Rd        := Cat(sumWires(3)(8,0) , sumWires(2)(7,1) , sumWires(1)(8,0) , sumWires(0)(7,1))
+        io.vxsat_out := io.vxsat_in     // Status register. No extra overflow information coming out of this operation
+
+    //=====================================================================
+    //PSAS.HX -- SIMD 16-bit Signed Saturating Cross Addition & Subtraction
+    //=====================================================================
+    }.elsewhen(io.operation === ALUops.PSASHX) {
+        twosComplement.io.widthSel := true.B        // 16bit complement generator selected
+        // Adder 0          ===ADDITION===
+        fourByteAdder.io.a(0)       := io.Rs1(23 , 16)
+        fourByteAdder.io.b(0)       := io.Rs2(7 , 0)
+        fourByteAdder.io.carryIn(0) := 0.U
+        // Adder 1
+        fourByteAdder.io.a(1)       := Cat(io.Rs1(31) , io.Rs1(31 , 24))
+        fourByteAdder.io.b(1)       := Cat(io.Rs2(15) , io.Rs2(15 , 8))
+        fourByteAdder.io.carryIn(1) := fourByteAdder.io.carryOut(0)
+        // Adder 2          ===SUBTRACTION===
+        fourByteAdder.io.a(2)       := io.Rs1(7 , 0)
+        twosComplement.io.input(2)  := Cat(io.Rs2(23) , io.Rs2(23 , 16))
+        fourByteAdder.io.b(2)       := twosComplement.io.output(2)
+        fourByteAdder.io.carryIn(2) := 0.U
+        // Adder 3
+        fourByteAdder.io.a(3)       := Cat(io.Rs1(15) , io.Rs1(15 , 8))
+        twosComplement.io.input(3)  := Cat(io.Rs2(31) , io.Rs2(31 , 24))
+        fourByteAdder.io.b(3)       := twosComplement.io.output(3)
+        fourByteAdder.io.carryIn(3) := fourByteAdder.io.carryOut(2)
+
+        when((fourByteAdder.io.sum(1)).asSInt < -128.S) { 
+            sumWires(2)         := 0.U       // saturate the result
+            sumWires(3)         := (-128.S(9.W)).asUInt
+            overflowDetected(1) := true.B           // Set overflow flag 
+        }.elsewhen((fourByteAdder.io.sum(1)).asSInt > 127.S) {
+            sumWires(2)         := 255.U
+            sumWires(3)         := (127.S(9.W)).asUInt
+            overflowDetected(1) := true.B           // Set overflow flag 
+        }.otherwise {
+            sumWires(2)         := fourByteAdder.io.sum(0)
+            sumWires(3)         := fourByteAdder.io.sum(1)
+            overflowDetected(1) := false.B         // Unset overflow flag
+        }
+
+        when((fourByteAdder.io.sum(3)).asSInt < -128.S) {                      
+            sumWires(0)         := 0.U
+            sumWires(1)         := (-128.S(9.W)).asUInt
+            overflowDetected(3) := true.B           // Set overflow flag 
+        }.elsewhen((fourByteAdder.io.sum(3)).asSInt > 127.S) {
+            sumWires(0)         := 255.U
+            sumWires(1)         := (127.S(9.W)).asUInt
+            overflowDetected(3) := true.B           // Set overflow flag 
+        }.otherwise {
+            sumWires(0)         := fourByteAdder.io.sum(2)
+            sumWires(1)         := fourByteAdder.io.sum(3)
+            overflowDetected(3) := false.B           // Unset overflow flag
+        }
+
+        io.Rd        := Cat(sumWires(3)(7,0) , sumWires(2)(7,0) , sumWires(1)(7,0) , sumWires(0)(7,0))
+        io.vxsat_out := Cat(io.vxsat_in(31, 1) , overflowDetected(0) | overflowDetected(1) | overflowDetected(2) | overflowDetected(3)) 
+    
+    //===================================================
+    //PSA.HX -- SIMD 16-bit Cross Subtraction & Addition
+    //===================================================
+    }.elsewhen(io.operation === ALUops.PSAHX) {
+        twosComplement.io.widthSel  := true.B
+        // Adder 0          ===SUBTRACTION===
+        fourByteAdder.io.a(0)       := io.Rs1(23 , 16)
+        twosComplement.io.input(0)  := io.Rs2(7 , 0)    // lower 8 bit sent as is to 16bit Twos Complement generator
+        fourByteAdder.io.b(0)       := twosComplement.io.output(0)  // Complemented lower 8bits and a left padded 0 sent to Adder0
+        fourByteAdder.io.carryIn(0) := 0.U      // Carryin is 0 for Adder0, since 16bit additions
+        sumWires(2)                 := fourByteAdder.io.sum(0)
+        // Adder 1
+        fourByteAdder.io.a(1)       := io.Rs1(31 , 24)
+        twosComplement.io.input(1)  := Cat(io.Rs2(15) , io.Rs2(15 , 8))     // Upper 8bits concatenated with MSB in order to get 16bit complement value
+        fourByteAdder.io.b(1)       := twosComplement.io.output(1)      // Complemented 9bit value sent to Adder1. But result extracts only 8 bits, thus fine
+        fourByteAdder.io.carryIn(1) := fourByteAdder.io.carryOut(0)     // Carryout from previous byte result added to next byte. We are interested in 16bit result
+        sumWires(3)                 := fourByteAdder.io.sum(1)
+        //Adder 2           ===ADDITION===
+        fourByteAdder.io.a(2)       := io.Rs1(7 , 0)
+        fourByteAdder.io.b(2)       := io.Rs2(23 , 16)
+        fourByteAdder.io.carryIn(2) := 0.U  
+        sumWires(0)                 := fourByteAdder.io.sum(2)
+        // Adder 3
+        fourByteAdder.io.a(3)       := io.Rs1(15 , 8)
+        fourByteAdder.io.b(3)       := io.Rs2(31 , 24)
+        fourByteAdder.io.carryIn(3) := fourByteAdder.io.carryOut(2)
+        sumWires(1)                 := fourByteAdder.io.sum(3)
+
+        io.Rd        := Cat(sumWires(3)(7,0) , sumWires(2)(7,0) , sumWires(1)(7,0) , sumWires(0)(7,0))
+        io.vxsat_out := io.vxsat_in     // Status register
+        //There is no overflow information. Status register left untouched
+    
+    //===================================================================
+    //PASA.HX -- SIMD 16-bit Signed Averaging Cross Subtraction & Addition
+    //===================================================================
+    }.elsewhen(io.operation === ALUops.PASAHX) {
+        twosComplement.io.widthSel := true.B        // 16bit complement generator selected
+        // Adder0           ===SUBTRACTION===
+        fourByteAdder.io.a(0)       := io.Rs1(23 , 16)        // Does not need any concat. For first byte in 16bit, we are not concerned with 9th bit. Adder-a input will be of 9bits though
+        twosComplement.io.input(0)  := Cat(io.Rs2(7) , io.Rs2(7 , 0))       // Need concat because complement value is to be obtained
+        fourByteAdder.io.b(0)       := twosComplement.io.output(0)      // lower 8bits from SE-17bit-complemented values goes to (9.W) b input of Adder(REFER to TwosComplementGenerator class). Left padded 0 in order to preserve any carry. 
+        fourByteAdder.io.carryIn(0) := 0.U
+        sumWires(2)                 := fourByteAdder.io.sum(0)      // carryout , lower 8bit 2's complement result = 9bit output. But after s>>1, (7,1) bits are needed of this result 
+        // Adder 1
+        fourByteAdder.io.a(1)       := Cat(io.Rs1(31) , io.Rs1(31 , 24))     // Sign Extension for first input in order to get SE17
+        twosComplement.io.input(1)  := Cat(io.Rs2(15) , io.Rs2(15 , 8))     // Sign Extended second input sent to 16bit complement generator
+        fourByteAdder.io.b(1)       := twosComplement.io.output(1)      // Upper 9bits from SE-17bit-complemented values goes to (9.W) b input of Adder(REFER to TwosComplementGenerator class).
+        fourByteAdder.io.carryIn(1) := fourByteAdder.io.carryOut(0)     // Carry from previous byte
+        sumWires(3)                 := fourByteAdder.io.sum(1)      // 9bit sum value in 2's complement form. All 9bits needed after s>>1
+        // Adder 2          ===ADDITION===
+        fourByteAdder.io.a(2)       := io.Rs1(7 , 0)
+        fourByteAdder.io.b(2)       := io.Rs2(23 , 16)
+        fourByteAdder.io.carryIn(2) := 0.U
+        sumWires(0)                 := fourByteAdder.io.sum(2)       
+        // Adder 3
+        fourByteAdder.io.a(3)       := Cat(io.Rs1(15) , io.Rs1(15 , 8))
+        fourByteAdder.io.b(3)       := Cat(io.Rs2(31) , io.Rs2(31 , 24))
+        fourByteAdder.io.carryIn(3) := fourByteAdder.io.carryOut(2)
+        sumWires(1)                 := fourByteAdder.io.sum(3)
+
+        io.Rd        := Cat(sumWires(3)(8,0) , sumWires(2)(7,1) , sumWires(1)(8,0) , sumWires(0)(7,1))
+        io.vxsat_out := io.vxsat_in     // Status register
+        //There is no overflow information. Status register left untouched
+    
+    //=====================================================================
+    //PSSA.HX -- SIMD 16-bit Signed Saturating Cross Subtraction & Addition
+    //=====================================================================
+    }.elsewhen(io.operation === ALUops.PSSAHX) {
+        twosComplement.io.widthSel := true.B        // 16bit complement generator selected
+        // Adder 0
+        fourByteAdder.io.a(0)       := io.Rs1(23 , 16)
+        twosComplement.io.input(0)  := Cat(io.Rs2(7) , io.Rs2(7 , 0))       // Need concat because complement value is to be obtained
+        fourByteAdder.io.b(0)       := twosComplement.io.output(0)      // lower 8bits from SE-17bit-complemented values goes to (9.W) b input of Adder(REFER to TwosComplementGenerator class). Left padded 0 in order to preserve any carry. 
+        fourByteAdder.io.carryIn(0) := 0.U
+        // Adder 1
+        fourByteAdder.io.a(1)       := Cat(io.Rs1(31) , io.Rs1(31 , 24))
+        twosComplement.io.input(1)  := Cat(io.Rs2(15) , io.Rs2(15 , 8))
+        fourByteAdder.io.b(1)       := twosComplement.io.output(1)      // Upper 9bits from SE-17bit-complemented values goes to (9.W) b input of Adder
+        fourByteAdder.io.carryIn(1) := fourByteAdder.io.carryOut(0)  
+        // Adder 2
+        fourByteAdder.io.a(2)       := io.Rs1(7 , 0)
+        fourByteAdder.io.b(2)       := io.Rs2(23 , 16)
+        fourByteAdder.io.carryIn(2) := 0.U
+        // Adder 3
+        fourByteAdder.io.a(3)       := Cat(io.Rs1(15) , io.Rs1(15 , 8))
+        fourByteAdder.io.b(3)       := Cat(io.Rs2(31) , io.Rs2(31 , 24))
+        fourByteAdder.io.carryIn(3) := fourByteAdder.io.carryOut(2)
+
+        when((fourByteAdder.io.sum(1)).asSInt < -128.S) {                     // Saturating condition for lower 16bit result
+            sumWires(2)         := 0.U    // saturate the result
+            sumWires(3)         := (-128.S(9.W)).asUInt
+            overflowDetected(1) := true.B           // Set overflow flag 
+        }.elsewhen((fourByteAdder.io.sum(1)).asSInt > 127.S) {
+            sumWires(2)         := 255.U     // saturate the result
+            sumWires(3)         := (127.S(9.W)).asUInt
+            overflowDetected(1) := true.B           // Set overflow flag 
+        }.otherwise {
+            sumWires(2)         := fourByteAdder.io.sum(0)
+            sumWires(3)         := fourByteAdder.io.sum(1)
+            overflowDetected(1) := false.B           // Unset overflow flag 
+        }
+
+        when((fourByteAdder.io.sum(3)).asSInt < -128.S) {
+            sumWires(0)         := 0.U
+            sumWires(1)         := (127.S(9.W)).asUInt
+            overflowDetected(3) := true.B           // Set overflow flag 
+        }.elsewhen((fourByteAdder.io.sum(3)).asSInt > 127.S) {
+            sumWires(0)         := 255.U
+            sumWires(1)         := (127.S(9.W)).asUInt
+            overflowDetected(3) := true.B           // Set overflow flag 
+        }.otherwise {
+            sumWires(0)         := fourByteAdder.io.sum(2)
+            sumWires(1)         := fourByteAdder.io.sum(3)
+            overflowDetected(3) := false.B         // Unset overflow flag
+        }
+        
+        io.Rd        := Cat(sumWires(3)(7,0) , sumWires(2)(7,0) , sumWires(1)(7,0) , sumWires(0)(7,0))
+        io.vxsat_out := Cat(io.vxsat_in(31, 1) , overflowDetected(0) | overflowDetected(1) | overflowDetected(2) | overflowDetected(3)) 
+    
     }
 }
  
