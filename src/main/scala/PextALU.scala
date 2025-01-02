@@ -1,6 +1,5 @@
 import chisel3._
 import chisel3.util._
-//import chisel3.experimental.ChiselEnum
 
 // Defining ALU operations as enumeration type using ChiselEnum
 object ALUops extends ChiselEnum {
@@ -20,8 +19,12 @@ class AdderALU extends Module {
       val carryOut = Output(Vec(4, UInt(1.W)))   // Four 1-bit outputs to store carry-out for each byte addition
     })
 
-    // Intermediate result wire to hold the 9-bit addition results before splitting into sum and carry-out
-    val interResult = Wire(Vec(4,UInt(9.W)))
+    // Outputs initialised to zero
+    io.sum      := VecInit(Seq.fill(4)(0.U(9.W)))
+    io.carryOut := VecInit(Seq.fill(4)(0.U(1.W)))  
+
+    // Intermediate result wire to hold the 9-bit addition results before splitting into sum and carry-out. Initialised to zero
+    val interResult = WireDefault(VecInit(Seq.fill(4)(0.U(9.W))))
 
     // Perform SIMD-style addition for 4 independent 8-bit elements
     for(x <- 0 until 4) {   
@@ -44,20 +47,23 @@ class TwosComplementGenerator extends Module {
         val widthSel = Input(Bool())                // Configurable for 8bit and 16bit operations. ture.B => 8bit, false.B => 16bit
     })
     
-    // Intermediate wire to hold the results of two's complement calculations
-    val complementValue = Wire(Vec(4,UInt(9.W)))
+    // Outputs initialised to zero
+    io.output := VecInit(Seq.fill(4)(0.U(9.W)))
 
-    //******************************************************
+    // Intermediate wire to hold the results of two's complement calculations initialised to zero
+    val complementValue = WireDefault(VecInit(Seq.fill(4)(0.U(9.W))))
+
+    //--------------------------------------------------
     //For 4x8-bit Two's Complement Generation -> false.B
-    //******************************************************
+    //--------------------------------------------------
     when(io.widthSel === false.B) {      
         for (m <- 0 until 4) {
             // Compute two's complement: one's complement (~io.input(m)) + 1
             complementValue(m) := ~(io.input(m)) + 1.U           
         }  
-    //******************************************************
+    //--------------------------------------------------
     //For 2x16-bit Two's Complement Generation -> true.B
-    //******************************************************
+    //--------------------------------------------------
     }.otherwise {   
         val lower16 = Cat(io.input(1) , io.input(0)(7,0))   // input(1) is received as 9bits with Sign Extension.  Concatenates input(1) and lower 8 bits of input(0) to form a 17-bit value
         val upper16 = Cat(io.input(3) , io.input(2)(7,0))   // Similar as above. For 17th bit MSB Sign Extension, check the respective operation.
@@ -87,13 +93,15 @@ class SimdMuxHalf extends Module {
         val falseVal = Input(Vec(2, UInt(16.W)))   // False values for lower and upper halves
         val out      = Output(Vec(2, UInt(16.W)))  // Outputs for lower and upper halves
     })
+    // Outputs initialised to zero
+    io.out := VecInit(Seq.fill(2)(0.U(16.W)))
     
     io.out(0) := Mux(io.cond(0), io.trueVal(0), io.falseVal(0)) // Lower half
     io.out(1) := Mux(io.cond(1), io.trueVal(1), io.falseVal(1)) // Upper half
 }
 
 //=======================================================
-// Module handing the signed and unsigned clip operations
+// Module handling the signed and unsigned clip operations
 //=======================================================
 class SimdClipHalf extends Module {
     val io = IO(new Bundle {
@@ -103,6 +111,10 @@ class SimdClipHalf extends Module {
         val out        = Output(Vec(2, SInt(16.W))) // Outputs for lower and upper halves
         val overflow   = Output(Vec(2, Bool()))     // Overflow detection for lower and upper halves
     })
+
+    // Outputs initialised to zero
+    io.out      := VecInit(Seq.fill(2)(0.S(16.W)))
+    io.overflow := VecInit(Seq.fill(2)(false.B))
 
     // Clipping logic
     for (i <- 0 until 2) {
@@ -133,6 +145,10 @@ class PextALU extends Module {
         val vxsat_out = Output(UInt(32.W))      // Output for the updated overflow status register
     })
 
+    // Outputs initialised to zero
+    io.Rd        := 0.U
+    io.vxsat_out := 0.U
+
     // Instantiation
     val fourByteAdder    = Module(new AdderALU())                   // 4x8-bit adder module
     val twosComplement   = Module(new TwosComplementGenerator())    // Two's Complement generator module
@@ -140,17 +156,16 @@ class PextALU extends Module {
     val simdClip         = Module(new SimdClipHalf())               // Module for signed and unsigned clip operations
 
     // Internal Wires
-    val sumWires         = Wire(Vec(4, UInt(9.W)))      // 9-bit wires to hold results from four-byte adder
-    val overflowDetected = VecInit(Seq.fill(4)(WireDefault(false.B)))   // A vector of 4 wires to capture overflow info for each 8-bit adder. Default value is 0
-    val lowerHalf        = WireDefault(0.U(16.W))       // 16-bit wire for the lower half of comparison operations
-    val upperHalf        = WireDefault(0.U(16.W))       // 16-bit wire for the upper half of comparison operations
+    val sumWires         = WireDefault(VecInit(Seq.fill(4)(0.U(9.W))))  // 9-bit wires to hold results from four-byte adder
+    val overflowDetected = VecInit(Seq.fill(4)((false.B)))              // A vector of 4 wires to capture overflow info for each 8-bit adder. Default value is 0
+    //val lowerHalf        = WireDefault(0.U(16.W))                       // 16-bit wire for the lower half of comparison operations
+    //val upperHalf        = WireDefault(0.U(16.W))                       // 16-bit wire for the upper half of comparison operations
 
-    // Default values
-    // Initialize all inputs of `fourByteAdder` to zero by default
+    // Initialize all inputs of `fourByteAdder` to zero 
     fourByteAdder.io.a         := VecInit(Seq.fill(4)(0.U(9.W)))
     fourByteAdder.io.b         := VecInit(Seq.fill(4)(0.U(9.W)))
     fourByteAdder.io.carryIn   := VecInit(Seq.fill(4)(0.U(1.W)))
-    // Initialize all inputs of `twosComplement` to zero by default
+    // Initialize all inputs of `twosComplement` to zero
     twosComplement.io.input    := VecInit(Seq.fill(4)(0.U(9.W)))
     twosComplement.io.widthSel := false.B
     // Initialise the inputs of Mux module
@@ -161,13 +176,8 @@ class PextALU extends Module {
     simdClip.io.in         := VecInit(Seq.fill(2)(0.S(16.W)))
     simdClip.io.upperLimit := 0.S(16.W)
     simdClip.io.lowerLimit := 0.S(16.W)
-    // Initialize the internal wires and outputs to default values
-    sumWires             := VecInit(Seq.fill(4)(0.U(9.W)))
-    io.Rd        := 0.U
-    io.vxsat_out := 0.U
     
     // ALU operation selection 
-
     //================================
     // 1. PADD.B -- SIMD 8bit Addition 
     //================================
@@ -1030,7 +1040,7 @@ class PextALU extends Module {
         //  =====OUTPUT=====
           io.Rd        := Cat(simdMux.io.out(1), simdMux.io.out(0)) // Concatenate upper and lower halves
           io.vxsat_out := io.vxsat_in
-   
+    
     //====================================================
     // 27. PMSLT.H -- SIMD 16-bit Signed Compare Less Than
     //====================================================
@@ -1047,7 +1057,7 @@ class PextALU extends Module {
         //  =====OUTPUT=====
         io.Rd        := Cat(simdMux.io.out(1), simdMux.io.out(0)) // Concatenate upper and lower halves
         io.vxsat_out := io.vxsat_in
- 
+    
     //=======================================================
     // 28. PMSLTU.H -- SIMD 16-bit Unsigned Compare Less Than
     //=======================================================
@@ -1064,7 +1074,7 @@ class PextALU extends Module {
         //  =====OUTPUT=====
         io.Rd        := Cat(simdMux.io.out(1), simdMux.io.out(0)) // Concatenate upper and lower halves
         io.vxsat_out := io.vxsat_in
-   
+    
     //=============================================================
     // 29. PMSLE.H -- SIMD 16-bit Signed Compare Less Than or Equal         Possible nomenclature error in the specification
     //=============================================================
@@ -1081,7 +1091,7 @@ class PextALU extends Module {
             //  =====OUTPUT=====
               io.Rd        := Cat(simdMux.io.out(1), simdMux.io.out(0)) // Concatenate upper and lower halves
               io.vxsat_out := io.vxsat_in
-  
+    
     //===============================================================
     // 30. PMSLEU.H -- SIMD 16-bit Unsigned Compare Less Than & Equal       Possible nomenclature error in the specification
     //===============================================================
@@ -1098,7 +1108,8 @@ class PextALU extends Module {
         //  =====OUTPUT=====
         io.Rd        := Cat(simdMux.io.out(1), simdMux.io.out(0)) // Concatenate upper and lower halves
         io.vxsat_out := io.vxsat_in
- 
+    
+     //==================================MIN MAX INSTRUCTIONS====================================//
     //=========================================
     // 31. PMIN.H -- SIMD 16-bit Signed Minimum
     //=========================================
@@ -1120,7 +1131,7 @@ class PextALU extends Module {
         //  =====OUTPUT=====
         io.Rd        := Cat(simdMux.io.out(1), simdMux.io.out(0)) // Concatenate upper and lower halves
         io.vxsat_out := io.vxsat_in
-
+    
     //============================================
     // 32. PMINU.H -- SIMD 16-bit Unsigned Minimum
     //============================================
@@ -1143,7 +1154,7 @@ class PextALU extends Module {
         //  =====OUTPUT=====
         io.Rd        := Cat(simdMux.io.out(1), simdMux.io.out(0)) // Concatenate upper and lower halves
         io.vxsat_out := io.vxsat_in
-
+    
     //=========================================
     // 33. PMAX.H -- SIMD 16-bit Signed Maximum
     //=========================================
@@ -1166,7 +1177,7 @@ class PextALU extends Module {
         //  =====OUTPUT=====
         io.Rd        := Cat(simdMux.io.out(1), simdMux.io.out(0)) // Concatenate upper and lower halves
         io.vxsat_out := io.vxsat_in
-
+    
     //============================================
     // 34. PMAXU.H -- SIMD 16-bit Unsigned Maximum
     //============================================
@@ -1190,12 +1201,13 @@ class PextALU extends Module {
         io.Rd        := Cat(simdMux.io.out(1), simdMux.io.out(0)) // Concatenate upper and lower halves
         io.vxsat_out := io.vxsat_in
     
+     //==================================ABOLUTE VALUE INSTRUCTION====================================//
     //===================================
     // 35. PABS.H -- SIMD 16-bit Absolute       // Possible correction in specification in both nomenclature and operation
     //===================================
         // * Rs1 contains signed 16bit elements
         // * If 16bit element is >= zero, result is as it is
-        // * For negative values, take 2's complement
+        // * For negative values, negate the Rs1 value
     }.elsewhen(io.operation === ALUops.PABSH) {
 
         //  =====CONDITION=====
@@ -1216,37 +1228,44 @@ class PextALU extends Module {
         io.Rd        := Cat(simdMux.io.out(1), simdMux.io.out(0)) // Concatenate upper and lower halves
         io.vxsat_out := io.vxsat_in
     
+     //==================================CLIP INSTRUCTIONS====================================//
     //=============================================
-    // 36. PCLIP.H -- SIMD 16-bit Signed Clip Value      Greyed out on the specification. Operation's enum value is chosen based on the naming logic derived from previous non-greyed instruction.
+    // 36. PCLIP.H -- SIMD 16-bit Signed Clip Value      Grayed out on the specification. Operation's enum value is chosen based on the naming logic derived from previous non-grayed instruction.
     //=============================================
     }.elsewhen(io.operation === ALUops.PCLIPH) {
         val imm4u           = (io.Rs2(3,0)).asUInt      // Decoder extracts and sends in the immediate value, padded to 32 bits, at Rs2 input port.
 
-        simdClip.io.upperLimit := (1.S << imm4u) - 1.S  // Unsigned immediate value is used to form the signed upper limit for clip op.
-        simdClip.io.lowerLimit := -(1.S << imm4u)       // Unsigned immediate value is used to form the signed lower limit for clip op.
+        simdClip.io.upperLimit := (1.S << imm4u) - 1.S  // Unsigned immediate value is used to form the signed upper limit for clip operation.
+        simdClip.io.lowerLimit := -(1.S << imm4u)       // Unsigned immediate value is used to form the signed lower limit for clip operation.
         simdClip.io.in         := VecInit(Seq(
-          io.Rs1(15, 0).asSInt,                         // Lower half input
-          io.Rs1(31, 16).asSInt                         // Upper half input
+          io.Rs1(15, 0).asSInt,                         // Lower half input fed to clipping logic. Input is a signed element and compared with signed limiting values.
+          io.Rs1(31, 16).asSInt                         // Upper half input fed to clipping logic. Input is a signed element and compared with signed limiting values.
         ))
     
         io.Rd        := Cat(simdClip.io.out(1), simdClip.io.out(0)) // Concatenate upper and lower halves
-        io.vxsat_out := Cat(io.vxsat_in(31, 1), simdClip.io.overflow(0) | simdClip.io.overflow(1)) 
+        io.vxsat_out := Cat(io.vxsat_in(31, 1), simdClip.io.overflow(0) | simdClip.io.overflow(1))  
 
     //================================================
-    // 37. PCLIPU.H -- SIMD 16-bit Unsigned Clip Value      Greyed out on the specification. Operation's enum value is chosen based on the naming logic derived from previous non-greyed instruction.
+    // 37. PCLIPU.H -- SIMD 16-bit Unsigned Clip Value      Grayed out on the specification. Operation's enum value is chosen based on the naming logic derived from previous non-grayed instruction.
     //================================================
     }.elsewhen(io.operation === ALUops.PCLIPUH) {
         val imm4u          = (io.Rs2(3,0)).asUInt       // Decoder extracts and sends in the immediate value, padded to 32 bits, at Rs2 input port.
 
-        simdClip.io.upperLimit := (1.S << imm4u) - 1.S
-        simdClip.io.lowerLimit := 0.S
+        simdClip.io.upperLimit := (1.S << imm4u) - 1.S  // Unsigned immediate value is used to form the upper limit for clip operation.
+        simdClip.io.lowerLimit := 0.S                   // Lower limit for the unsigned clip operation is zero.
         simdClip.io.in := VecInit(Seq(
-          io.Rs1(15, 0).asSInt,                         // Lower half input
-          io.Rs1(31, 16).asSInt                         // Upper half input
+          io.Rs1(15, 0).asSInt,                         // Lower half input fed to clipping logic. Input is a signed element and compared with signed limiting values.
+          io.Rs1(31, 16).asSInt                         // Upper half input fed to clipping logic. Input is a signed element and compared with signed limiting values.
         ))
     
         io.Rd := Cat(simdClip.io.out(1), simdClip.io.out(0)) // Concatenate upper and lower halves
         io.vxsat_out := Cat(io.vxsat_in(31, 1), simdClip.io.overflow(0) | simdClip.io.overflow(1))
+    //================================================
+    //                      NOP
+    //================================================    
+    }.otherwise {
+        io.Rd        := 0.U
+        io.vxsat_out := io.vxsat_in
     }   
 }
  
